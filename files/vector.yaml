@@ -1,0 +1,13 @@
+sources:
+  demo_logs:
+    type: file
+    include:
+      - "/var/log/syslog"
+
+sinks:
+  to_console:
+    type: console
+    inputs:
+      - demo_logs
+    encoding:
+      codec: text

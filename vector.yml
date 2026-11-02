@@ -1,0 +1,91 @@
+---
+- name: Install Vector on Debian 11 without roles
+  hosts: clickhouse-01
+  # gather_facts: false
+  become: true
+
+  vars:
+    vector_repo_url: "https://packages.timber.io/vector/latest/vector_latest-1_amd64.deb"
+    vector_dest: "/tmp/vector_latest-1_amd64.deb"
+    vector_config_path: "/etc/vector/vector.toml"
+
+  tasks:
+    - name: Ensure required packages for HTTPS repo and key management are installed
+      apt:
+        name:
+          - ca-certificates
+          - gnupg
+          - curl
+          - xz-utils
+          - apt-transport-https
+        state: present
+        update_cache: yes
+      tags:
+        - prereq
+
+    - name: Download .deb with checksum verification
+      get_url:
+        url: "{{ vector_repo_url }}"
+        dest: "{{ vector_dest }}"
+        mode: "0644"
+        timeout: 60
+      register: download_result
+      changed_when: download_result.changed
+
+    #- name: Download Vector signing key
+    #  get_url:
+    #    url: "{{ vector_key_url }}"
+    #    dest: "/usr/share/keyrings/vector-archive-keyring.gpg"
+    #    mode: "0644"
+    #  tags:
+    #    - repo
+
+    #- name: Add Vector APT repository
+    #  apt_repository:
+    #    repo: "deb [signed-by=/usr/share/keyrings/vector-archive-keyring.gpg] {{ vector_repo_url }}{{ vector_dist }} main"
+    #    state: present
+    #    filename: vector
+    #  tags:
+    #    - repo
+
+    - name: Update apt cache after adding repo
+      apt:
+        update_cache: yes
+      changed_when: false
+      tags:
+        - repo
+
+    - name: Install vector package
+      apt:
+        state: present
+        deb: "{{ vector_dest }}"
+        lock_timeout: 300
+      register: install_result
+      when: not download_result.failed
+      changed_when: install_result.changed
+      tags:
+        - install
+
+    - name: Deploy Vector config
+      ansible.builtin.copy:
+        src: files/vector.yaml
+        dest: /etc/vector/vector.yaml
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "vector validate --config-yaml %s"
+
+    - name: Ensure vector service is enabled and started
+      systemd:
+        name: vector
+        enabled: yes
+        state: started
+      tags:
+        - service
+
+    - name: Verify vector is running
+      command: systemctl is-active --quiet vector
+      register: vector_status
+      failed_when: vector_status.rc != 0
+      tags:
+        - verify
